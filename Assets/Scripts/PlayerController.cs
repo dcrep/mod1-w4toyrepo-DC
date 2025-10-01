@@ -42,11 +42,16 @@ public class PlayerController : MonoBehaviour
     private float currentHoldTime = 0f;
     private Vector2 lastMoveValue = Vector2.zero;
 
+    [SerializeField] private int applesCollected = 0;
+    [SerializeField] private float velocityMult = 10f;
+    [SerializeField] private float maxMagnitude = 3f;
+
     void Awake()
     {
         playerControls = new InputSystem_Actions();
 
         playerRB = gameObject.GetComponent<Rigidbody>();
+        springJoint = null;
     }
 
     private void OnEnable()
@@ -73,7 +78,6 @@ public class PlayerController : MonoBehaviour
     void Start()
     {
         lineRenderer = gameObject.GetComponent<LineRenderer>();
-        springJoint = null;
         //moveAction = InputSystem.actions.FindAction("move");
         //Vector2 moveValue = moveAction.ReadValue<Vector2>();
         //Debug.Log("Move Value: " + moveValue);
@@ -81,6 +85,11 @@ public class PlayerController : MonoBehaviour
     }
     void Update()
     {
+        // fell out of world?
+        if (transform.position.y < -8f)
+        {
+            QuickQuit();
+        }
         Vector2 moveValue = moveAction.ReadValue<Vector2>();
         movementInput = moveValue;
         bool isButtonInput = IsButtonOrKeyInput(moveAction.activeControl);
@@ -111,6 +120,13 @@ public class PlayerController : MonoBehaviour
         }
 
         lastMoveValue = moveValue;
+
+        if (moveValue.y > 0.1f && springJoint != null)
+        {
+            //Debug.Log("Move Value: " + moveValue);
+            playerRB.linearVelocity = new Vector3(playerRB.linearVelocity.x, 0, playerRB.linearVelocity.z);
+            playerRB.AddForce(Vector3.up * 2, ForceMode.Impulse);
+        }
 
         /*if (Input.GetMouseButtonDown(0))
         {
@@ -156,6 +172,14 @@ public class PlayerController : MonoBehaviour
         if (springJoint != null)
         {
             lineRenderer.SetPosition(0, gameObject.transform.position);
+        }
+    }
+    void OnCollisionEnter(Collision collision)
+    {
+        if (collision.gameObject.CompareTag("Apple"))
+        {
+            applesCollected++;
+            Destroy(collision.gameObject);
         }
     }
     public void GrappleStart()
@@ -244,19 +268,31 @@ public class PlayerController : MonoBehaviour
         {
             return;
         }
-        if (springJoint == null)
+        if (springJoint != null)
         {
+            Vector3 distanceToGrapple = gameObject.transform.position - springJoint.connectedAnchor;
+            if (distanceToGrapple.magnitude > maxMagnitude)
+            {
+                distanceToGrapple.Normalize();
+                distanceToGrapple *= maxMagnitude;
+            }
+            //playerRB.collisionDetectionMode = CollisionDetectionMode.Continuous;
+            playerRB.linearVelocity = -distanceToGrapple * velocityMult;
+            GrappleEnd();
+        }
+        else
+        {
+            // Check if grounded before allowing jump
             bool isGrounded = Physics.Raycast(player.transform.position, Vector3.down, 1.1f);
             if (!isGrounded)
             {
-                return;
+                return; // Prevent jump if not grounded
             }
-        }
-
             //playerRB.AddForce(Vector3.up * 40, ForceMode.Impulse);
             playerRB.linearVelocity = new Vector3(playerRB.linearVelocity.x, 0, playerRB.linearVelocity.z);
             playerRB.AddForce(Vector3.up * jumpForce, ForceMode.Impulse);
             // isGrounded = false;
+        }
 
     }
     // Check if the active control is a button or key (not an analog stick)
