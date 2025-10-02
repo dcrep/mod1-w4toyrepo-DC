@@ -1,4 +1,4 @@
-//using System.Numerics;
+using System;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.InputSystem;
@@ -23,7 +23,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float baseSpeed = 2f;
     [SerializeField] private float maxSpeed = 5f;
     [SerializeField] private float accelerationTime = 3f; // Time to reach max speed
-    private float currentSpeed = 0f;
+    private float currentSpeed = 1f;
 
     // Spring connection variables
     //[SerializeField] private GameObject grapplePoint;
@@ -39,7 +39,8 @@ public class PlayerController : MonoBehaviour
 
     private LineRenderer lineRenderer;
 
-    private float currentHoldTime = 0f;
+    //private float currentHoldTime = 0f;
+    private float startHoldTime = Mathf.Infinity;
     private Vector2 lastMoveValue = Vector2.zero;
 
     [SerializeField] private int applesCollected = 0;
@@ -90,53 +91,35 @@ public class PlayerController : MonoBehaviour
         {
             QuickQuit();
         }
-        Vector2 moveValue = moveAction.ReadValue<Vector2>();
-        movementInput = moveValue;
+
+        Vector2 moveValue = moveAction.ReadValue<Vector2>();        
         bool isButtonInput = IsButtonOrKeyInput(moveAction.activeControl);
 
-        // Only apply acceleration for button/key inputs
-        if (isButtonInput && moveValue.magnitude > 0.1f)
+        if (isButtonInput)
         {
-            // Check if same direction is being held
-            if (Vector2.Dot(moveValue.normalized, lastMoveValue.normalized) > 0.9f)
-            {
-                currentHoldTime += Time.deltaTime;
-            }
-            else
-            {
-                currentHoldTime = 0f; // Reset if direction changed
-            }
+            if (startHoldTime == Mathf.Infinity) startHoldTime = Time.time;
+            movementInput = DigitalToAnalogInput(moveValue, lastMoveValue, ref startHoldTime, baseSpeed, maxSpeed, accelerationTime);
+            //Debug.Log("Movement Input: " + movementInput + " (Raw: " + moveValue + ")");
         }
         else
         {
-            currentHoldTime = 0f; // Reset if no input or analog input
+            movementInput = moveValue;
         }
-
-        // Calculate speed based on hold time (only for button inputs)
-        currentSpeed = baseSpeed;
-        if (isButtonInput && currentHoldTime > 0)
-        {
-            currentSpeed = Mathf.Lerp(baseSpeed, maxSpeed, currentHoldTime / accelerationTime);
-        }
-
         lastMoveValue = moveValue;
 
-        if (moveValue.y > 0.1f && springJoint != null)
+        // Pressing up while grappled = simulate 'jump'
+        // TODO: (should probably draw it in towards grapple point instead when Y position above grapple point)
+        if (movementInput.y > 0.1f && springJoint != null)
         {
             //Debug.Log("Move Value: " + moveValue);
             playerRB.linearVelocity = new Vector3(playerRB.linearVelocity.x, 0, playerRB.linearVelocity.z);
             playerRB.AddForce(Vector3.up * 2, ForceMode.Impulse);
         }
 
-        /*if (Input.GetMouseButtonDown(0))
-        {
-            GrappleStart();
-            DrawGrappleLine();
-        }
-        else if (Input.GetMouseButtonUp(0))
-        {
-            GrappleEnd();
-        }*/
+        //if (Input.GetMouseButtonDown(0))
+        //{ GrappleStart(); DrawGrappleLine(); }
+        //else if (Input.GetMouseButtonUp(0))
+        //{ GrappleEnd(); }
     }
     void FixedUpdate()
     {
@@ -173,6 +156,51 @@ public class PlayerController : MonoBehaviour
         {
             lineRenderer.SetPosition(0, gameObject.transform.position);
         }
+    }
+    // This can be handled better (especially the startTime ref)
+    Vector2 DigitalToAnalogInput(Vector2 digitalInput, Vector2 lastMoveValue, ref float startTime, float startSpeed, float maxSpeed, float accelTime)
+    {
+        //Debug.Log("Digital Input: " + digitalInput + " Last Move Value: " + lastMoveValue + " Start Time: " + startTime);
+        // No movement input = 0 speed
+        if (digitalInput.magnitude < 0.1f)
+        {
+            //Debug.Log("No input - returning zero");
+            startTime = Mathf.Infinity;
+            return Vector2.zero;
+        }
+        // x value moved in opposite direction?
+        if (lastMoveValue.x < 0.1f && digitalInput.x > 0.1f ||
+            lastMoveValue.x > 0.1f && digitalInput.x < 0.1f)
+        {
+            //Debug.Log("X direction changed");
+            // y value direction changed?
+            if (lastMoveValue.y < 0.1f && digitalInput.y > 0.1f ||
+                lastMoveValue.y > 0.1f && digitalInput.y < 0.1f)
+            {
+                // Reset speed * start time
+                startTime = Time.time;
+                return digitalInput.normalized * startSpeed;
+            }
+        }
+        // y value moved in opposite direction?
+        else if (lastMoveValue.y < 0.1f && digitalInput.y > 0.1f ||
+            lastMoveValue.y > 0.1f && digitalInput.y < 0.1f)
+        {
+            //Debug.Log("Y direction changed");
+            // (x value hasn't changed direction if we're here)
+            // however if no x input is being applied, reset speed
+            if (Mathf.Abs(digitalInput.x) < 0.1f)
+            {
+                // Reset speed * start time
+                startTime = Time.time;
+                return digitalInput.normalized * startSpeed;
+            }
+            // else fall through to continue accelerating
+        }
+        //Debug.Log("Continuing acceleration");
+        float holdTime = Time.time - startTime;
+        float speed = Mathf.Lerp(startSpeed, maxSpeed, Mathf.Clamp(holdTime / accelTime, 0f, 1f));
+        return digitalInput.normalized * speed;
     }
     void OnCollisionEnter(Collision collision)
     {
